@@ -7,15 +7,15 @@ class LeadValidator(validators.Validator):
     name = validators.CharField(required=False)
     email = validators.EmailField(required=True)
     recaptcha = ReCaptchaV3Field(
-        action='lead_magnet',
+        action="lead_magnet",
     )
 
     class Meta:
         fields = [
-            'name',
-            'email',
+            "name",
+            "email",
         ]
 
-    def validate(self, attrs):
-        attrs.pop('recaptcha')
+    def validate(self, attrs: dict) -> dict:
+        attrs.pop("recaptcha")
         return attrs

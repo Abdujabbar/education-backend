@@ -1,20 +1,24 @@
+from dataclasses import dataclass
+
+from app.services import BaseService
 from orders.models import Order
 
 
-class OrderUnshipper:
-    def __init__(self, order: Order):
-        self.order = order
+@dataclass
+class OrderUnshipper(BaseService):
+    order: Order
 
-    def __call__(self):
-        self.order.item.unship(order=self.order)
+    def act(self) -> Order:
+        if self.order.shipped is not None:
+            self.unship_item()
+            self.mark_order_as_unshipped()
 
-        self.mark_order_as_unpaid()
-        self.mark_order_as_unshipped()
+        return self.order
 
-    def mark_order_as_unshipped(self):
+    def unship_item(self) -> None:
+        if self.order.item is not None:
+            self.order.item.unship(order=self.order)
+
+    def mark_order_as_unshipped(self) -> None:
         self.order.shipped = None
-        self.order.save()
-
-    def mark_order_as_unpaid(self):
-        self.order.paid = None
-        self.order.save()
+        self.order.save(update_fields=["shipped", "modified"])

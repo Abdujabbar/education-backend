@@ -1,33 +1,49 @@
-from typing import Any, Generator, Optional
-
-import contextlib
 from collections import UserList
+import contextlib
 from dataclasses import dataclass
+from typing import Generator
 
+from notion.rewrite import rewrite
+from notion.types import BlockData
 from notion.types import BlockId
 
 
 @dataclass
 class NotionBlock:
     id: BlockId
-    data: dict[str, Any]
+    data: BlockData
+
+    def to_json(self) -> dict:
+        return {"id": self.id, "data": self.data}
+
+    @classmethod
+    def from_json(cls, data: dict) -> "NotionBlock":
+        return cls(id=data["id"], data=data["data"])
+
+    def get_data(self) -> BlockData:
+        return rewrite(self.data)
 
     @property
     def content(self) -> list[BlockId]:
         try:
-            return self.data['value']['content']
+            return self.data["value"]["content"]
         except KeyError:
             return list()
 
     @property
-    def type(self) -> Optional[str]:
+    def type(self) -> str | None:
         with contextlib.suppress(KeyError):
-            return self.data['value']['type']
+            return self.data["value"]["type"]
 
 
 class NotionBlockList(UserList[NotionBlock]):
     @classmethod
-    def from_api_response(cls, api_response: dict[str, dict]) -> 'NotionBlockList':
+    def from_json(cls, data: dict) -> "NotionBlockList":
+        blocks = [NotionBlock.from_json(block_dict) for block_dict in data]
+        return cls(blocks)
+
+    @classmethod
+    def from_api_response(cls, api_response: dict[str, BlockData]) -> "NotionBlockList":
         instance = cls()
         for block_id, data in api_response.items():
             instance.append(NotionBlock(id=block_id, data=data))
@@ -50,13 +66,13 @@ class NotionBlockList(UserList[NotionBlock]):
     def blocks_with_underliying_blocks(self) -> Generator[NotionBlock, None, None]:
         """List of non-page blocks that have other blocks in it"""
         for block in self.data:
-            if block.type != 'page':
+            if block.type != "page":
                 if len(block.content) > 1:
                     yield block
 
     @property
-    def first_page_block(self) -> Optional[NotionBlock]:
+    def first_page_block(self) -> NotionBlock | None:
         """We assume that first block with type == 'page' is the root block, that has some unlderlying blocks we should fetch"""
         for block in self.data:
-            if block.type == 'page' and len(block.content) > 0:
+            if block.type == "page" and len(block.content) > 0:
                 return block

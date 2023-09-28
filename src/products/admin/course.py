@@ -1,8 +1,13 @@
-from django.utils.translation import gettext_lazy as _
+from typing import Any
 
-from app.admin import ModelAdmin, admin
+from django.http import HttpRequest
+from django.utils.translation import gettext as _
+
+from amocrm import tasks
+from app.admin import admin
+from app.admin import ModelAdmin
+from mailing.admin.email_configuration import EmailConfigurationAdmin
 from products.admin.courses import actions
-from products.admin.courses.record import RecordAdmin
 from products.models import Course
 
 
@@ -10,65 +15,70 @@ from products.models import Course
 class CourseAdmin(ModelAdmin):
     fieldsets = [
         (
-            _('Name'),
+            _("Name"),
             {
-                'fields': [
-                    'name',
-                    'name_genitive',
-                    'name_receipt',
-                    'full_name',
-                    'group',
+                "fields": [
+                    "name",
+                    "slug",
+                    "cover",
+                    "display_in_lms",
+                    "disable_triggers",
+                    "group",
+                    "name_genitive",
+                    "name_receipt",
+                    "full_name",
+                    "name_international",
                 ],
             },
         ),
         (
-            _('Price'),
+            _("Price"),
             {
-                'fields': [
-                    'price',
-                    'old_price',
-                    'tinkoff_credit_promo_code',
+                "fields": [
+                    "price",
+                    "old_price",
                 ],
             },
         ),
         (
-            _('Access'),
+            _("Email messages"),
             {
-                'fields': [
-                    'slug',
-                    'display_in_lms',
-                    'clickmeeting_room_url',
-                    'zoomus_webinar_id',
-                    'welcome_letter_template_id',
-                    'gift_welcome_letter_template_id',
-                    'mailchimp_list_id',
+                "fields": [
+                    "welcome_letter_template_id",
+                    "diploma_template_context",
+                ],
+            },
+        ),
+        (
+            _("Order confirmation"),
+            {
+                "fields": [
+                    "confirmation_template_id",
+                    "confirmation_success_url",
                 ],
             },
         ),
     ]
 
-    list_display = [
-        'id',
-        'group',
-        'name',
-        'slug',
-    ]
+    list_display = (
+        "id",
+        "group",
+        "name",
+        "slug",
+        "has_cover",
+    )
 
-    list_filter = [
-        'group',
-    ]
+    list_filter = ("group",)
 
-    list_display_links = [
-        'id',
-        'name',
-    ]
+    list_display_links = (
+        "id",
+        "name",
+    )
 
     prepopulated_fields = {
-        'slug': ['name'],
+        "slug": ["name"],
     }
-    inlines = [
-        RecordAdmin,
-    ]
+    inlines = (EmailConfigurationAdmin,)
     action_form = actions.CourseActionForm
 
     actions = [
@@ -77,3 +87,13 @@ class CourseAdmin(ModelAdmin):
     ]
 
     save_as = True
+
+    @admin.display(boolean=True)
+    def has_cover(self, course: Course) -> bool:
+        return bool(course.cover)
+
+    def save_model(self, request: HttpRequest, obj: Course, form: Any, change: Any) -> None:
+        super().save_model(request, obj, form, change)
+
+        if tasks.amocrm_enabled():
+            tasks.push_course.apply_async(kwargs={"course_id": obj.pk}, countdown=1)

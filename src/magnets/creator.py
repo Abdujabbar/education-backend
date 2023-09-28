@@ -1,39 +1,39 @@
-from typing import Optional
+from dataclasses import dataclass
 
-from magnets.models import EmailLeadMagnetCampaign, LeadCampaignLogEntry
+from app.services import BaseService
+from magnets.models import EmailLeadMagnetCampaign
+from magnets.models import LeadCampaignLogEntry
 from users.models import User
 from users.services import UserCreator
 
 
-class LeadCreator:
-    def __init__(self, campaign: EmailLeadMagnetCampaign, email: str, name: Optional[str] = None):
+@dataclass
+class LeadCreator(BaseService):
+    campaign: EmailLeadMagnetCampaign
+    email: str
+    name: str | None = None
+
+    def __post_init__(self) -> None:
         self.data = {
-            'name': name or '',
-            'email': email,
+            "name": self.name or "",
+            "email": self.email,
         }
 
-        self.campaign = campaign
+    def act(self) -> None:
+        user = self._create_user()
+        self._create_log_entry(user)
 
-    def __call__(self):
-        self.user = self._create_user()
-        self._create_log_entry()
-
-        self.campaign.execute(self.user)
+        self.campaign.execute(user)
 
     def _create_user(self) -> User:
         return UserCreator(
-            name=self.data['name'],
-            email=self.data['email'],
+            name=self.data["name"],
+            email=self.data["email"],
             subscribe=True,
-            tags=self.tags,
         )()
 
-    def _create_log_entry(self):
+    def _create_log_entry(self, user: User) -> None:
         LeadCampaignLogEntry.objects.create(
-            user=self.user,
+            user=user,
             campaign=self.campaign,
         )
-
-    @property
-    def tags(self):
-        return [f'{self.campaign.slug}-lead-magnet']

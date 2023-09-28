@@ -6,14 +6,10 @@ install-deps: deps
 
 deps:
 	pip install --upgrade pip pip-tools
-	pip-compile requirements.in
+	pip-compile --output-file requirements.txt --resolver=backtracking pyproject.toml
 
 dev-deps: deps
-	pip-compile dev-requirements.in
-
-fetchdb:
-	scp borshev.com:/srv/pmdaily/storage/pmdaily.sqlite storage/
-	cd src && ./manage.py anonymize_db
+	pip-compile --extra=dev --output-file dev-requirements.txt --resolver=backtracking pyproject.toml
 
 server:
 	cd src && ./manage.py migrate && ./manage.py runserver
@@ -21,14 +17,17 @@ server:
 worker:
 	cd src && celery -A app worker -E --purge
 
+fmt:
+	cd src && autoflake --in-place --remove-all-unused-imports --recursive .
+	cd src && isort .
+	cd src && black .
+
 lint:
 	cd src && ./manage.py makemigrations --check --no-input --dry-run
 	flake8 src
 	cd src && mypy
 
 test:
-	cd src && pytest -n 4 --ff -x && pytest --dead-fixtures
-
-coverage:
-	cd src && pytest --dead-fixtures && pytest --cov-report=xml --cov=. -n4 -x
-
+	cd src && pytest -n 4 --ff -x --create-db --cov-report=xml --cov=. -m 'not single_thread'
+	cd src && pytest --ff -x --cov-report=xml --cov=. --cov-append -m 'single_thread'
+	cd src && pytest --dead-fixtures

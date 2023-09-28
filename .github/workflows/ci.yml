@@ -10,20 +10,22 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
 
-      - uses: actions/setup-python@v2
+      - uses: actions/setup-python@v4
+        id: setup-python
         with:
-          python-version: "3.9.9"
+          python-version-file: '.python-version'
 
-      - uses: actions/cache@v2
+      - uses: actions/cache@v3
+        id: cache-dependencies
         with:
           path: |
             venv
-          key: ${{ runner.os }}-venv-v3-${{ hashFiles('**/*requirements.txt') }}
+          key: ${{ runner.os }}-venv-${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('**/*requirements.txt') }}
 
       - name: Install dependencies
-        if: steps.cache-primes.outputs.cache-hit != 'true'
+        if: steps.cache-dependencies.outputs.cache-hit != 'true'
         run: |
           python -m venv venv
           . venv/bin/activate
@@ -40,7 +42,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:13.3-alpine
+        image: postgres:13.9-alpine
         env:
           POSTGRES_PASSWORD: secret
         options: >-
@@ -51,37 +53,40 @@ jobs:
         ports:
           - 5432:5432
       redis:
-        image: redis:6.2.6-alpine
+        image: redis:6.2.10-alpine
         ports:
           - 6379:6379
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
 
-      - uses: actions/setup-python@v2
+      - uses: actions/setup-python@v4
+        id: setup-python
         with:
-          python-version: "3.9.9"
+          python-version-file: '.python-version'
 
-      - uses: actions/cache@v2
+      - uses: actions/cache@v3
         with:
           path: |
             venv
-          key: ${{ runner.os }}-venv-v3-${{ hashFiles('**/*requirements.txt') }}
+          key: ${{ runner.os }}-venv-${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('**/*requirements.txt') }}
 
       - name: Install locale stuff
-        run: sudo apt-get --no-install-recommends install -y locales-all gettext
+        run: |
+          sudo apt-get update
+          sudo apt-get --no-install-recommends install -y locales-all gettext
 
       - name: Run the tests
         env:
           DATABASE_URL: postgres://postgres:secret@localhost:5432/postgres
-          REDISCLOUD_URL: redis://localhost
+          REDISCLOUD_URL: redis://localhost:6379/5
         run: |
           . venv/bin/activate
           cp src/app/.env.ci src/app/.env
-          make coverage
+          make test
 
       - name: Upload code coverage to codeclimate
-        uses: paambaati/codeclimate-action@v3.0.0
+        uses: paambaati/codeclimate-action@v3.2.0
         env:
           CC_TEST_REPORTER_ID: dd4cac59d43b52ee4c29cfed9d5162098a49ff65d9e72003abc1fa65cd608f1d
         with:
@@ -93,41 +98,145 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
+
+      - uses: actions/setup-python@v4
+        id: setup-python
+        with:
+          python-version-file: '.python-version'
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v1
+        uses: docker/setup-qemu-action@v2
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v1
+        uses: docker/setup-buildx-action@v2
 
       - name: Store default envfironment file to be runnable at the developer machine
         run: cp src/app/.env.ci src/app/.env
 
       - name: Generate image identifier
         id: image
-        uses: ASzc/change-string-case-action@v1
+        uses: ASzc/change-string-case-action@v5
         with:
-          string: ${{ github.repository }}-backend
+          string: ${{ github.repository_owner }}
 
       - name: Login to GitHub Container Registry
-        uses: docker/login-action@v1
+        uses: docker/login-action@v2
         if: ${{ github.ref == 'refs/heads/master' }}
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build image
-        id: docker_build
-        uses: docker/build-push-action@v2
+      - name: Build web image
+        uses: docker/build-push-action@v3
         with:
           context: .
+          target: web
           push: ${{ github.ref == 'refs/heads/master' }}
           tags: |
-            ghcr.io/${{ steps.image.outputs.lowercase }}:latest
-            ghcr.io/${{ steps.image.outputs.lowercase }}:${{ github.sha }}
+            ghcr.io/${{ steps.image.outputs.lowercase }}/monolith-web:latest
+            ghcr.io/${{ steps.image.outputs.lowercase }}/monolith-web:${{ github.sha }}
+
           build-args: |
-            - RELEASE=${{ github.sha }}
+            PYTHON_VERSION=${{ steps.setup-python.outputs.python-version }}
+            RELEASE=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Build worker image
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          target: worker
+          push: ${{ github.ref == 'refs/heads/master' }}
+          tags: |
+            ghcr.io/${{ steps.image.outputs.lowercase }}/monolith-worker:latest
+            ghcr.io/${{ steps.image.outputs.lowercase }}/monolith-worker:${{ github.sha }}
+          build-args: |
+            PYTHON_VERSION=${{ steps.setup-python.outputs.python-version }}
+            RELEASE=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build scheduler image
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          target: scheduler
+          push: ${{ github.ref == 'refs/heads/master' }}
+          tags: |
+            ghcr.io/${{ steps.image.outputs.lowercase }}/monolith-scheduler:latest
+            ghcr.io/${{ steps.image.outputs.lowercase }}/monolith-scheduler:${{ github.sha }}
+          build-args: |
+            PYTHON_VERSION=${{ steps.setup-python.outputs.python-version }}
+            RELEASE=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: build-docker-image
+    if: github.ref == 'refs/heads/master' && github.repository_owner == 'tough-dev-school'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Draft Sentry release
+        uses: getsentry/action-release@v1
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
+        with:
+          environment: production
+          finalize: false
+
+      - name: Read image identifiers
+        id: image
+        uses: ASzc/change-string-case-action@v5
+        with:
+          string: ${{ github.repository_owner }}
+
+      - name: Update backend image
+        uses: appleboy/ssh-action@v0.1.7
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: circle
+          key: ${{ secrets.DEPLOY_KEY }}
+          script: docker service update app_backend --image ghcr.io/${{ steps.image.outputs.lowercase }}/monolith-web:${{ github.sha }} --with-registry-auth
+
+      - name: Update celery worker image
+        uses: appleboy/ssh-action@v0.1.7
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: circle
+          key: ${{ secrets.DEPLOY_KEY }}
+          script: docker service update app_worker --image ghcr.io/${{ steps.image.outputs.lowercase }}/monolith-worker:${{ github.sha }} --with-registry-auth
+
+      - name: Update celery amocrm worker image
+        uses: appleboy/ssh-action@v0.1.7
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: circle
+          key: ${{ secrets.DEPLOY_KEY }}
+          script: docker service update app_amocrm-worker --image ghcr.io/${{ steps.image.outputs.lowercase }}/monolith-worker:${{ github.sha }} --with-registry-auth
+
+      - name: Update celery scheduler image
+        uses: appleboy/ssh-action@v0.1.7
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: circle
+          key: ${{ secrets.DEPLOY_KEY }}
+          script: |
+            docker service update app_scheduler --detach --image ghcr.io/${{ steps.image.outputs.lowercase }}/monolith-scheduler:${{ github.sha }} --with-registry-auth
+
+      - name: Finalize Sentry release
+        uses: getsentry/action-release@v1
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
+        with:
+          environment: production
+          finalize: true

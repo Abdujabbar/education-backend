@@ -2,7 +2,7 @@ from django.apps import AppConfig
 
 
 class OrdersConfig(AppConfig):
-    name = 'orders'
+    name = "orders"
 
-    def ready(self):
+    def ready(self) -> None:
         import orders.signals.handlers  # noqa

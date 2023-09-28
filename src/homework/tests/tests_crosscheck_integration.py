@@ -7,18 +7,15 @@ pytestmark = [pytest.mark.django_db]
 
 
 @pytest.fixture
-def course(mixer):
-    return mixer.blend('products.Course')
-
-
-@pytest.fixture
 def questions(mixer, course):
-    return mixer.cycle(2).blend('homework.Question', course=course)
+    questions = mixer.cycle(2).blend("homework.Question")
+    course.question_set.add(*questions)
+    return questions
 
 
 @pytest.fixture
 def users(mixer):
-    return mixer.cycle(10).blend('users.User')
+    return mixer.cycle(10).blend("users.User")
 
 
 @pytest.fixture(autouse=True)
@@ -38,10 +35,13 @@ def _allow_email_sending(settings):
 def submit_answer(api):
     def _submit(author, answer, question):
         api.auth(author)
-        api.post('/api/v2/homework/answers/', {
-            'question': question.slug,
-            **answer,
-        })
+        api.post(
+            "/api/v2/homework/answers/",
+            {
+                "question": question.slug,
+                **answer,
+            },
+        )
 
     return _submit
 
@@ -54,8 +54,9 @@ def submit_homework(users, submit_answer, mailoutbox):
                 author=user,
                 question=question,
                 answer={
-                    'text': f'Горите в аду. С любовью, {user}',
-                })
+                    "text": f"Горите в аду. С любовью, {user}",
+                },
+            )
 
     return _submit
 

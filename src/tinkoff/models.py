@@ -1,21 +1,23 @@
 from django.utils.translation import gettext_lazy as _
 
-from app.models import TimestampedModel, models
+from app.models import models
+from app.models import TimestampedModel
 
 
 class PaymentNotification(TimestampedModel):
     """Notifcation for acquiring order by TinkoffBank"""
+
     STATUS_CHOICES = (
-        ('AUTHORIZED', _('Authorized')),
-        ('CONFIRMED', _('Confirmed')),
-        ('REVERSED', _('Reversed')),
-        ('REFUNDED', _('Refunded')),
-        ('PARTIAL_REFUNDED', _('Partial refunded')),
-        ('REJECTED', _('Rejected')),
+        ("AUTHORIZED", _("Authorized")),
+        ("CONFIRMED", _("Confirmed")),
+        ("REVERSED", _("Reversed")),
+        ("REFUNDED", _("Refunded")),
+        ("PARTIAL_REFUNDED", _("Partial refunded")),
+        ("REJECTED", _("Rejected")),
     )
 
     terminal_key = models.CharField(max_length=512)
-    order_id = models.IntegerField()
+    order = models.ForeignKey("orders.Order", on_delete=models.PROTECT, related_name="tinkoff_payment_notifications")
     success = models.BooleanField()
     status = models.CharField(max_length=128, choices=STATUS_CHOICES)
     payment_id = models.BigIntegerField()
@@ -31,15 +33,16 @@ class PaymentNotification(TimestampedModel):
 
 class CreditNotification(TimestampedModel):
     """Notification for credit order by TinkoffCredit"""
-    STATUSES_CHOICES = (
-        ('approved', _('Approved')),
-        ('rejected', _('Rejected')),
-        ('canceled', _('Canceled')),
-        ('signed', _('Signed')),
+
+    STATUS_CHOICES = (
+        ("approved", _("Approved")),
+        ("rejected", _("Rejected")),
+        ("canceled", _("Canceled")),
+        ("signed", _("Signed")),
     )
 
-    order_id = models.IntegerField()
-    status = models.CharField(max_length=32, choices=STATUSES_CHOICES)
+    order = models.ForeignKey("orders.Order", on_delete=models.PROTECT, related_name="tinkoff_credit_notifications")
+    status = models.CharField(max_length=32, choices=STATUS_CHOICES)
     bank_created = models.DateTimeField()
     first_payment = models.DecimalField(max_digits=10, decimal_places=2)
     order_amount = models.DecimalField(max_digits=10, decimal_places=2)
@@ -53,3 +56,23 @@ class CreditNotification(TimestampedModel):
     middle_name = models.CharField(max_length=32, blank=True, null=True)
     loan_number = models.CharField(max_length=128, blank=True, null=True)
     email = models.CharField(max_length=128, null=True, blank=True)
+
+
+class DolyameNotification(TimestampedModel):
+    STATUS_CHOICES = (
+        ("approved", _("Approved")),
+        ("rejected", _("Rejected")),
+        ("refunded", _("Refunded")),
+        ("canceled", _("Canceled")),
+        ("committed", _("Committed")),
+        ("wait_for_commit", _("Waiting for commit")),
+        ("completed", _("Completed")),
+    )
+
+    order = models.ForeignKey("orders.Order", related_name="dolyame_notifications", on_delete=models.PROTECT)
+    status = models.CharField(max_length=32, choices=STATUS_CHOICES)
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    demo = models.BooleanField()
+    residual_amount = models.DecimalField(max_digits=10, decimal_places=2)
+    client_info = models.JSONField(default=dict)
+    payment_schedule = models.JSONField(default=dict)

@@ -1,57 +1,63 @@
-from typing import Iterable, Optional
-
+from dataclasses import dataclass
 import uuid
+
 from rest_framework import serializers
 
-from app.tasks import subscribe_to_mailchimp
+from django.utils.functional import cached_property
+
+from app.services import BaseService
 from users.models import User
+from users.tasks import rebuild_tags
 
 
 class UserCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = [
-            'first_name',
-            'last_name',
-            'username',
-            'email',
-            'subscribed',
+            "first_name",
+            "last_name",
+            "username",
+            "email",
+            "subscribed",
         ]
 
 
-class UserCreator:
-    """Service object for creating a user"""
-    def __init__(self, email: str, name: Optional[str] = None, subscribe: Optional[bool] = True, tags: Optional[Iterable[str]] = None):
-        self.do_subscribe = subscribe
-        self.subscribe_tags = tags
+@dataclass
+class UserCreator(BaseService):
+    email: str
+    name: str | None = ""
+    subscribe: bool | None = False
+    push_to_amocrm: bool = True
 
-        email = email.lower()
+    @cached_property
+    def username(self) -> str:
+        return self.email.lower() or str(uuid.uuid4())
 
-        self.data = {
-            'email': email,
-            'username': email or str(uuid.uuid4()),
-            'subscribed': subscribe,
-            **User.parse_name(name or ''),
-        }
+    def act(self) -> User:
+        user = self.get() or self.create()
+        self.after_creation(created_user=user)
 
-    def __call__(self) -> User:
-        self.resulting_user = self.get() or self.create()
+        return user
 
-        self.after_creation()
-        return self.resulting_user
-
-    def get(self) -> Optional[User]:
-        return User.objects.filter(is_active=True).filter(email=self.data['email']).first()
+    def get(self) -> User | None:
+        if self.email:
+            return User.objects.filter(is_active=True).filter(email__iexact=self.email).first()
 
     def create(self) -> User:
-        serializer = UserCreateSerializer(data=self.data)
+        serializer = UserCreateSerializer(
+            data={
+                "email": self.email.lower(),
+                "username": self.username,
+                "subscribed": self.subscribe,
+                **User.parse_name(self.name or ""),
+            }
+        )
         serializer.is_valid(raise_exception=True)
 
         serializer.save()
 
         return serializer.instance  # type: ignore
 
-    def after_creation(self) -> None:
-        if self.do_subscribe:
-            if self.resulting_user.email and len(self.resulting_user.email):
-                subscribe_to_mailchimp.delay(user_id=self.resulting_user.pk, tags=self.subscribe_tags)
+    def after_creation(self, created_user: User) -> None:
+        can_be_subscribed = bool(self.subscribe and created_user.email and len(created_user.email))
+        rebuild_tags.delay(student_id=created_user.id, subscribe=can_be_subscribed)

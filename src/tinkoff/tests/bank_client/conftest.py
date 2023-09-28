@@ -1,5 +1,6 @@
 import pytest
-import requests_mock
+
+import respx
 
 from tinkoff.bank import TinkoffBank
 
@@ -8,33 +9,19 @@ pytestmark = [pytest.mark.django_db]
 
 @pytest.fixture(autouse=True)
 def _set_tinkoff_credentials(settings):
-    settings.TINKOFF_TERMINAL_KEY = 'k3y'
-    settings.TINKOFF_TERMINAL_PASSWORD = '123456'
+    settings.TINKOFF_TERMINAL_KEY = "k3y"
+    settings.TINKOFF_TERMINAL_PASSWORD = "123456"
 
 
 @pytest.fixture(autouse=True)
 def _set_absolute_host(settings):
-    settings.ABSOLUTE_HOST = 'https://tst.hst'
-    settings.FRONTEND_URL = 'https://front.tst.hst'
-
-
-@pytest.fixture
-def record(mixer):
-    return mixer.blend(
-        'products.Record',
-        name='Пентакли и тентакли',
-        name_receipt='Предоставление доступа к записи курса «Пентакли и Тентакли»',
-    )
-
-
-@pytest.fixture
-def order(factory, record):
-    return factory.order(item=record, price='100.50')
+    settings.ABSOLUTE_HOST = "https://tst.hst"
+    settings.FRONTEND_URL = "https://front.tst.hst"
 
 
 @pytest.fixture
 def tinkoff(user, order):
-    with requests_mock.Mocker() as m:
+    with respx.mock() as m:
         client = TinkoffBank(order)
 
         client.m = m

@@ -1,16 +1,19 @@
+from dataclasses import dataclass
+
 from django.utils.functional import cached_property
 
+from app.services import BaseService
 from orders.models import Order
 from users.models import User
 from users.services import UserCreator
 
 
-class OrderEmailChanger:
-    def __init__(self, order: Order, email: str):
-        self.order = order
-        self.email = email
+@dataclass
+class OrderEmailChanger(BaseService):
+    order: Order
+    email: str
 
-    def __call__(self):
+    def act(self) -> None:
         if self.was_shipped:
             self.order.unship()
 
@@ -26,6 +29,6 @@ class OrderEmailChanger:
 
     def get_user(self) -> User:
         user: User = self.order.user
-        user_creator = UserCreator(email=self.email, name=f'{user.first_name} {user.last_name}')
+        user_creator = UserCreator(email=self.email, name=f"{user.first_name} {user.last_name}")
 
         return user_creator()

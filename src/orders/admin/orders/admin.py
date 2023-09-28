@@ -1,11 +1,18 @@
-from django.utils.html import format_html
-from django.utils.safestring import mark_safe
-from django.utils.translation import gettext_lazy as _
+from rest_framework.request import Request
 
-from app.admin import ModelAdmin, admin
+from django.db.models import QuerySet
+from django.forms import Media
+from django.utils.safestring import mark_safe
+from django.utils.translation import gettext as _
+
+from app.admin import admin
+from app.admin import ModelAdmin
+from app.pricing import format_price
+from orders import human_readable
 from orders.admin.orders import actions
 from orders.admin.orders.filters import OrderStatusFilter
-from orders.admin.orders.forms import OrderAddForm, OrderChangeForm
+from orders.admin.orders.forms import OrderAddForm
+from orders.admin.orders.forms import OrderChangeForm
 from orders.models import Order
 from users.models import Student
 
@@ -15,103 +22,112 @@ class OrderAdmin(ModelAdmin):
     form = OrderChangeForm
     add_form = OrderAddForm
     list_display = [
-        'id',
-        'created',
-        'customer',
-        'item',
-        'is_paid',
-        'promocode',
+        "date",
+        "customer",
+        "item",
+        "formatted_price",
+        "payment",
+        "promocode",
     ]
     list_display_links = [
-        'id',
-        'created',
+        "date",
     ]
 
     list_filter = [
         OrderStatusFilter,
-        'course',
+        "course",
     ]
     search_fields = [
-        'id',
-        'course__name',
-        'record__course__name',
-        'user__first_name',
-        'user__last_name',
-        'user__email',
+        "course__name",
+        "record__course__name",
+        "user__first_name",
+        "user__last_name",
+        "user__email",
     ]
     actions = [
         actions.set_paid,
         actions.ship_without_payment,
-        actions.set_not_paid,
+        actions.refund,
         actions.ship_again_if_paid,
         actions.accept_homework,
         actions.disaccept_homework,
-        actions.generate_diplams,
+        actions.generate_diplomas,
     ]
     readonly_fields = [
-        'author',
-        'login_as',
-        'paid',
-        'shipped',
-        'unpaid',
+        "slug",
+        "author",
+        "login_as",
+        "paid",
+        "shipped",
+        "unpaid",
     ]
 
     fieldsets = [
         (
             None,
             {
-                'fields': ['user', 'price', 'email', 'author', 'login_as', 'paid', 'shipped', 'unpaid'],
+                "fields": ["slug", "user", "price", "email", "author", "login_as", "paid", "shipped", "unpaid"],
             },
         ),
         (
-            _('Item'),
+            _("Item"),
             {
-                'fields': ['course', 'record', 'bundle'],
+                "fields": ["course", "record", "bundle"],
             },
         ),
     ]
 
-    def get_queryset(self, request):
-        return super().get_queryset(request).select_related(
-            'user',
-            'record',
-            'course',
+    @property
+    def media(self) -> Media:
+        media = super().media
+
+        media._css_lists.append({"all": ["admin/order_list.css"]})  # type: ignore
+
+        return media
+
+    def get_queryset(self, request: Request) -> QuerySet:  # type: ignore
+        return (
+            super()
+            .get_queryset(request)
+            .select_related(
+                "user",
+                "record",
+                "course",
+            )
         )
 
-    @admin.display(description=_('User'), ordering='user__id')
-    def customer(self, obj):
-        return format_html(
-            '{name} &lt;<a href="mailto:{email}">{email}</a>&gt;',
-            name=str(obj.user),
-            email=obj.user.email,
-        )
+    @admin.display(description=_("Price"), ordering="price")
+    def formatted_price(self, obj: Order) -> str:
+        return format_price(obj.price)
 
-    @admin.display(description=_('Item'))
-    def item(self, obj):
-        return obj.item.name if obj.item is not None else '—'
+    @admin.display(description=_("Date"), ordering="created")
+    def date(self, obj: Order) -> str:
+        return obj.created.strftime("%d.%m.%Y")
 
-    @admin.display(description=_('Is paid'), ordering='paid')
-    def is_paid(self, obj: Order):
-        if obj.paid is not None:
-            return _('Paid')
+    @admin.display(description=_("User"), ordering="user__id")
+    def customer(self, obj: Order) -> str:
+        return human_readable.get_order_customer(obj)
 
-        if obj.shipped is not None:
-            return _('Shipped without payment')
+    @admin.display(description=_("Item"))
+    def item(self, obj: Order) -> str:
+        return obj.item.name if obj.item is not None else "—"
 
-        return _('Not paid')
+    @admin.display(description=_("Payment"), ordering="paid")
+    def payment(self, obj: Order) -> str:
+        return human_readable.get_order_payment_method_name(obj)
 
-    @admin.display(description=_('Login as customer'))
+    @admin.display(description=_("Login as customer"))
     @mark_safe
     def login_as(self, obj: Order) -> str:
         if obj.pk is None:
-            return '—'
+            return "—"  # type: ignore
 
         login_as_url = Student.objects.get(pk=obj.user_id).get_absolute_url()
 
         return f'<a href="{login_as_url}" target="_blank">Зайти от имени студента</a>'
 
-    def has_pay_permission(self, request):
-        return request.user.has_perm('orders.pay_order')
+    def has_pay_permission(self, request: Request) -> bool:
+        return request.user.has_perm("orders.pay_order")
 
-    def has_unpay_permission(self, request):
-        return request.user.has_perm('orders.unpay_order')
+    def has_unpay_permission(self, request: Request) -> bool:
+        return request.user.has_perm("orders.unpay_order")
